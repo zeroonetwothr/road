@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pypdf2
+langchain
+faiss-cpu
+sentence-transformers
+numpy
+python-multipart
+requests
+openai>=1.0

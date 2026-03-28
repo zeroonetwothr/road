@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>智能文档问答助手</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            max-width: 1000px;
+            background: #f5f5f5;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        .box {
+            border: 1px solid #ddd;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        textarea {
+            width: 100%;
+            height: 100px;
+            margin-top: 10px;
+            margin-bottom: 10px;
+            font-size: 15px;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+
+        button {
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 15px;
+        }
+
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background: #f7f7f7;
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .chunk {
+            background: #fafafa;
+            border-left: 4px solid #4CAF50;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+
+        .page-tag {
+            font-weight: bold;
+            color: #2c7a2c;
+            margin-bottom: 8px;
+        }
+
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .message {
+            padding: 12px;
+            border-radius: 10px;
+            max-width: 85%;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .user-message {
+            align-self: flex-end;
+            background: #dbeafe;
+        }
+
+        .assistant-message {
+            align-self: flex-start;
+            background: #f3f4f6;
+        }
+
+        .message-role {
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+    </style>
+</head>
+<body>
+    <h1>基于提示工程和微调的智能文档问答助手</h1>
+
+    <div class="box">
+        <h2>1. 上传 PDF 文档</h2>
+        <input type="file" id="pdfFile" accept=".pdf" multiple>
+        <button onclick="uploadFile()">上传文档</button>
+        <p id="uploadResult"></p>
+    </div>
+
+    <div class="box">
+        <h2>2. 多轮对话</h2>
+        <div id="chatContainer" class="chat-container"></div>
+        <textarea id="questionInput" placeholder="请输入你的问题"></textarea>
+        <button onclick="askQuestion()">提交问题</button>
+        <button onclick="clearHistory()">清空对话历史</button>
+    </div>
+
+    <div class="box">
+        <h2>检索到的相关文本块</h2>
+        <div id="chunksResult">这里会显示检索到的内容</div>
+    </div>
+
+    <script>
+        let chatHistory = [];
+
+
+
+        function renderChat() {
+            const chatContainer = document.getElementById("chatContainer");
+            chatContainer.innerHTML = "";
+
+            chatHistory.forEach((item) => {
+                const messageDiv = document.createElement("div");
+                messageDiv.className = "message";
+
+                if (item.role === "user") {
+                    messageDiv.classList.add("user-message");
+                } else if (item.role === "assistant") {
+                    messageDiv.classList.add("assistant-message");
+                }
+
+                const roleDiv = document.createElement("div");
+                roleDiv.className = "message-role";
+                roleDiv.innerText = item.role === "user" ? "用户" : "助手";
+
+                const contentDiv = document.createElement("div");
+                contentDiv.innerText = item.content;
+
+                messageDiv.appendChild(roleDiv);
+                messageDiv.appendChild(contentDiv);
+
+                chatContainer.appendChild(messageDiv);
+            });
+        }
+
+        function clearHistory() {
+            chatHistory = [];
+            renderChat();
+
+            const chunksResult = document.getElementById("chunksResult");
+            chunksResult.innerHTML = "这里会显示检索到的内容";
+        }
+
+
+        async function uploadFile() {
+            const fileInput = document.getElementById("pdfFile");
+            const uploadResult = document.getElementById("uploadResult");
+
+            if (fileInput.files.length === 0) {
+                uploadResult.innerText = "请先选择至少一个 PDF 文件。";
+                return;
+            }
+
+            const formData = new FormData();
+
+            for (let i = 0; i < fileInput.files.length; i++) {
+                formData.append("files", fileInput.files[i]);
+            }
+
+            try {
+                const response = await fetch("/upload", {
+                    method: "POST",
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                uploadResult.innerText =
+                    `上传成功，共上传 ${data.file_count} 个文件，切分为 ${data.chunk_count} 个文本块。`;
+            } catch (error) {
+                uploadResult.innerText = "上传失败：" + error;
+            }
+        }
+
+        async function askQuestion() {
+            const questionInput = document.getElementById("questionInput");
+            const chunksResult = document.getElementById("chunksResult");
+
+            const question = questionInput.value.trim();
+
+            if (!question) {
+                return;
+            }
+
+            chatHistory.push({
+                role: "user",
+                content: question
+            });
+
+            renderChat();
+            questionInput.value = "";
+
+            try {
+                const response = await fetch("/ask", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        question: question,
+                        history: chatHistory
+                    })
+                });
+
+                const data = await response.json();
+
+                chatHistory.push({
+                    role: "assistant",
+                    content: data.answer || "没有回答内容。"
+                });
+
+                renderChat();
+
+                chunksResult.innerHTML = "";
+
+                if (data.retrieved_chunks && data.retrieved_chunks.length > 0) {
+                    data.retrieved_chunks.forEach((chunk, index) => {
+                        const div = document.createElement("div");
+                        div.className = "chunk";
+
+                        const title = document.createElement("div");
+                        title.className = "page-tag";
+                        title.innerText =
+                            `文本块 ${index + 1}（来源：${chunk.file_name}，第 ${chunk.page} 页）`;
+
+                        const content = document.createElement("div");
+                        content.innerText = chunk.text;
+
+                        div.appendChild(title);
+                        div.appendChild(content);
+
+                        chunksResult.appendChild(div);
+                    });
+                } else {
+                    chunksResult.innerText = "没有检索到相关文本块。";
+                }
+            } catch (error) {
+                chatHistory.push({
+                    role: "assistant",
+                    content: "提问失败：" + error
+                });
+
+                renderChat();
+            }
+        }
+    </script>
+</body>
+</html>
